@@ -1,0 +1,1282 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>InvenScan - Consulta de Inventario</title>
+    <meta name="theme-color" content="#0F1A12">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        bg: '#0A0F0C',
+                        surface: '#131B16',
+                        card: '#1A241D',
+                        border: '#2A3A2F',
+                        fg: '#E8F0EB',
+                        muted: '#7A9484',
+                        accent: '#3DFF8F',
+                        accentDim: '#2DB86A',
+                        warm: '#FFB347',
+                        danger: '#FF5C5C',
+                        info: '#5CB8FF',
+                    },
+                    fontFamily: {
+                        sans: ['Space Grotesk', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
+        body { font-family: 'Space Grotesk', sans-serif; background: #0A0F0C; color: #E8F0EB; overflow-x: hidden; }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: #131B16; }
+        ::-webkit-scrollbar-thumb { background: #2A3A2F; border-radius: 4px; }
+
+        @keyframes fadeSlideUp {
+            from { opacity: 0; transform: translateY(24px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes pulseGlow {
+            0%, 100% { box-shadow: 0 0 20px rgba(61,255,143,0.15); }
+            50% { box-shadow: 0 0 40px rgba(61,255,143,0.3); }
+        }
+        @keyframes shimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+        }
+        @keyframes bounceIn {
+            0% { transform: scale(0.3); opacity: 0; }
+            50% { transform: scale(1.05); }
+            70% { transform: scale(0.95); }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-8px); }
+        }
+        @keyframes slideInRight {
+            from { opacity: 0; transform: translateX(20px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        .animate-slide-up { animation: fadeSlideUp 0.5s ease-out forwards; }
+        .animate-fade { animation: fadeIn 0.4s ease-out forwards; }
+        .animate-bounce-in { animation: bounceIn 0.6s ease-out forwards; }
+        .animate-float { animation: float 3s ease-in-out infinite; }
+        .animate-slide-right { animation: slideInRight 0.3s ease-out forwards; }
+
+        .stagger-1 { animation-delay: 0.05s; opacity: 0; }
+        .stagger-2 { animation-delay: 0.1s; opacity: 0; }
+        .stagger-3 { animation-delay: 0.15s; opacity: 0; }
+        .stagger-4 { animation-delay: 0.2s; opacity: 0; }
+
+        /* Navegación inferior */
+        .nav-btn {
+            display: flex; flex-direction: column; align-items: center; gap: 2px;
+            padding: 8px 16px; border-radius: 12px; transition: all 0.3s ease;
+            color: #7A9484; position: relative; cursor: pointer;
+        }
+        .nav-btn.active { color: #3DFF8F; }
+        .nav-btn.active::before {
+            content: ''; position: absolute; top: -4px; left: 50%; transform: translateX(-50%);
+            width: 20px; height: 3px; background: #3DFF8F; border-radius: 2px;
+        }
+        .nav-btn:active { transform: scale(0.92); }
+
+        /* Tarjeta de resultado */
+        .result-card {
+            background: linear-gradient(135deg, #1A241D 0%, #1F2E24 100%);
+            border: 1px solid #2A3A2F; border-radius: 16px; transition: all 0.3s ease;
+        }
+        .result-card.found { border-color: rgba(61,255,143,0.3); animation: pulseGlow 2s ease-in-out infinite; }
+        .result-card.not-found { border-color: rgba(255,92,92,0.3); }
+
+        .field-row {
+            display: flex; justify-content: space-between; align-items: flex-start;
+            padding: 12px 0; border-bottom: 1px solid rgba(42,58,47,0.5);
+        }
+        .field-row:last-child { border-bottom: none; }
+
+        /* Toast */
+        .toast {
+            position: fixed; top: 20px; left: 50%; transform: translateX(-50%) translateY(-100px);
+            z-index: 1000; padding: 12px 24px; border-radius: 12px;
+            font-size: 14px; font-weight: 500; transition: transform 0.4s cubic-bezier(0.175,0.885,0.32,1.275);
+            max-width: 90vw; text-align: center;
+        }
+        .toast.show { transform: translateX(-50%) translateY(0); }
+        .toast.success { background: rgba(61,255,143,0.15); border: 1px solid rgba(61,255,143,0.3); color: #3DFF8F; }
+        .toast.error { background: rgba(255,92,92,0.15); border: 1px solid rgba(255,92,92,0.3); color: #FF5C5C; }
+        .toast.info { background: rgba(92,184,255,0.15); border: 1px solid rgba(92,184,255,0.3); color: #5CB8FF; }
+
+        /* Partículas */
+        .bg-particles { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+        .particle {
+            position: absolute; border-radius: 50%; background: rgba(61,255,143,0.08);
+            animation: float 6s ease-in-out infinite;
+        }
+
+        /* Drop zone */
+        .drop-zone {
+            border: 2px dashed #2A3A2F; border-radius: 16px; padding: 40px 20px;
+            text-align: center; transition: all 0.3s ease; cursor: pointer;
+        }
+        .drop-zone:hover, .drop-zone.drag-over { border-color: #3DFF8F; background: rgba(61,255,143,0.03); }
+
+        /* Historial item */
+        .history-item {
+            padding: 14px 16px; border-radius: 12px; background: #131B16;
+            border: 1px solid #2A3A2F; transition: all 0.2s ease; cursor: pointer;
+        }
+        .history-item:active { transform: scale(0.98); background: #1A241D; }
+
+        /* Badge */
+        .badge {
+            display: inline-flex; align-items: center; gap: 4px;
+            padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600;
+        }
+
+        /* Input manual */
+        .manual-input {
+            background: #131B16; border: 1px solid #2A3A2F; border-radius: 12px;
+            padding: 14px 16px; color: #E8F0EB; font-family: 'JetBrains Mono', monospace;
+            font-size: 16px; width: 100%; outline: none; transition: border-color 0.3s;
+        }
+        .manual-input:focus { border-color: #3DFF8F; }
+        .manual-input::placeholder { color: #4A6454; }
+
+        /* Stat card */
+        .stat-card {
+            background: linear-gradient(135deg, #1A241D, #162019);
+            border: 1px solid #2A3A2F; border-radius: 14px; padding: 16px; flex: 1; min-width: 0;
+        }
+
+        /* Checkbox personalizado */
+        .custom-check {
+            appearance: none; -webkit-appearance: none;
+            width: 22px; height: 22px; border: 2px solid #2A3A2F; border-radius: 6px;
+            background: #131B16; cursor: pointer; transition: all 0.2s; flex-shrink: 0;
+            position: relative;
+        }
+        .custom-check:checked {
+            background: #3DFF8F; border-color: #3DFF8F;
+        }
+        .custom-check:checked::after {
+            content: ''; position: absolute; top: 3px; left: 6px;
+            width: 6px; height: 10px; border: solid #0A0F0C; border-width: 0 2.5px 2.5px 0;
+            transform: rotate(45deg);
+        }
+        .custom-check:active { transform: scale(0.9); }
+
+        /* Fila seleccionable de reporte */
+        .report-row {
+            padding: 12px; border-radius: 12px; background: #131B16;
+            border: 1px solid #2A3A2F; transition: all 0.2s ease; cursor: pointer;
+        }
+        .report-row.selected { border-color: rgba(61,255,143,0.4); background: rgba(61,255,143,0.04); }
+        .report-row:active { transform: scale(0.98); }
+
+        /* Barra flotante de PDF */
+        .pdf-bar {
+            position: sticky; bottom: 0; z-index: 30;
+            background: linear-gradient(to top, #0A0F0C 60%, transparent);
+            padding: 16px 16px 8px;
+            transform: translateY(100%); transition: transform 0.4s cubic-bezier(0.175,0.885,0.32,1.275);
+        }
+        .pdf-bar.visible { transform: translateY(0); }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+            z-index: 500; display: flex; align-items: flex-end; justify-content: center;
+            opacity: 0; pointer-events: none; transition: opacity 0.3s;
+        }
+        .modal-overlay.show { opacity: 1; pointer-events: auto; }
+        .modal-sheet {
+            background: #1A241D; border-radius: 24px 24px 0 0; width: 100%; max-width: 480px;
+            max-height: 80vh; overflow-y: auto; padding: 24px;
+            transform: translateY(100%); transition: transform 0.4s cubic-bezier(0.175,0.885,0.32,1.275);
+        }
+        .modal-overlay.show .modal-sheet { transform: translateY(0); }
+        .modal-handle { width: 40px; height: 4px; background: #2A3A2F; border-radius: 2px; margin: 0 auto 20px; }
+
+        /* Búsqueda grande */
+        .search-hero {
+            background: linear-gradient(135deg, rgba(61,255,143,0.06) 0%, rgba(61,255,143,0.01) 100%);
+            border: 1px solid rgba(61,255,143,0.12); border-radius: 20px;
+            padding: 24px 20px; position: relative; overflow: hidden;
+        }
+        .search-hero::before {
+            content: ''; position: absolute; top: -50%; right: -30%; width: 200px; height: 200px;
+            background: radial-gradient(circle, rgba(61,255,143,0.06), transparent 70%);
+            pointer-events: none;
+        }
+        .search-input-lg {
+            background: #0A0F0C; border: 2px solid #2A3A2F; border-radius: 14px;
+            padding: 16px 52px 16px 48px; color: #E8F0EB;
+            font-family: 'JetBrains Mono', monospace; font-size: 17px;
+            width: 100%; outline: none; transition: all 0.3s;
+        }
+        .search-input-lg:focus { border-color: #3DFF8F; box-shadow: 0 0 20px rgba(61,255,143,0.1); }
+        .search-input-lg::placeholder { color: #3A5444; }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-bg text-fg">
+
+    <div class="bg-particles" id="bgParticles"></div>
+    <div id="toast" class="toast"></div>
+
+    <div id="app" class="relative z-10 max-w-lg mx-auto min-h-screen flex flex-col">
+
+        <!-- ========== PANTALLA: CARGA DE EXCEL ========== -->
+        <div id="screenSetup" class="flex-1 flex flex-col px-5 pt-12 pb-6">
+            <div class="text-center mb-10 animate-slide-up">
+                <div class="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-br from-accent/20 to-accent/5 border border-accent/20 mb-5 animate-float">
+                    <span class="material-icons-round text-accent" style="font-size:40px;">inventory_2</span>
+                </div>
+                <h1 class="text-3xl font-bold tracking-tight mb-2">InvenScan</h1>
+                <p class="text-muted text-sm">Consulta tu inventario de forma rapida</p>
+            </div>
+
+            <div class="flex-1 flex flex-col gap-6">
+                <div id="dropZone" class="drop-zone animate-slide-up stagger-1" onclick="document.getElementById('fileInput').click()">
+                    <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" class="hidden" aria-label="Seleccionar archivo Excel">
+                    <span class="material-icons-round text-muted mb-3" style="font-size:48px;">cloud_upload</span>
+                    <p class="text-fg font-semibold mb-1">Cargar base de datos</p>
+                    <p class="text-muted text-sm">Arrastra o toca para seleccionar</p>
+                    <p class="text-muted/60 text-xs mt-2">Formatos: .xlsx, .xls, .csv</p>
+                </div>
+
+                <div id="fileInfo" class="hidden result-card p-4">
+                    <div class="flex items-center gap-3 mb-3">
+                        <div class="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center">
+                            <span class="material-icons-round text-accent" style="font-size:22px;">description</span>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <p id="fileName" class="font-semibold text-sm truncate"></p>
+                            <p id="fileStats" class="text-muted text-xs"></p>
+                        </div>
+                        <button onclick="removeFile()" class="text-muted hover:text-danger transition-colors p-1" aria-label="Eliminar archivo">
+                            <span class="material-icons-round" style="font-size:20px;">close</span>
+                        </button>
+                    </div>
+                    <div id="columnTags" class="flex flex-wrap gap-2 mb-4"></div>
+                    <div class="mb-3">
+                        <label class="text-xs text-muted font-semibold uppercase tracking-wider mb-2 block">Columna de codigo de consulta</label>
+                        <select id="codeColumnSelect" class="manual-input text-sm appearance-none cursor-pointer" aria-label="Seleccionar columna de codigo"></select>
+                    </div>
+                    <button id="btnStartScan" onclick="startApp()" class="w-full py-3.5 rounded-xl bg-accent text-bg font-bold text-sm hover:bg-accent/90 transition-all active:scale-95">
+                        Iniciar consulta
+                    </button>
+                </div>
+
+                <div class="animate-slide-up stagger-3 mt-2">
+                    <p class="text-xs text-muted/60 uppercase tracking-wider font-semibold mb-3">Como funciona</p>
+                    <div class="space-y-3">
+                        <div class="flex items-start gap-3">
+                            <div class="w-8 h-8 rounded-lg bg-card border border-border flex items-center justify-center flex-shrink-0 mt-0.5">
+                                <span class="text-accent font-mono text-xs font-bold">1</span>
+                            </div>
+                            <div>
+                                <p class="text-sm font-medium">Carga tu archivo Excel</p>
+                                <p class="text-xs text-muted">Con los datos de tu inventario</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <div class="w-8 h-8 rounded-lg bg-card border border-border flex items-center justify-center flex-shrink-0 mt-0.5">
+                                <span class="text-accent font-mono text-xs font-bold">2</span>
+                            </div>
+                            <div>
+                                <p class="text-sm font-medium">Selecciona la columna de codigos</p>
+                                <p class="text-xs text-muted">Indica cual contiene el codigo de consulta</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <div class="w-8 h-8 rounded-lg bg-card border border-border flex items-center justify-center flex-shrink-0 mt-0.5">
+                                <span class="text-accent font-mono text-xs font-bold">3</span>
+                            </div>
+                            <div>
+                                <p class="text-sm font-medium">Consulta por codigo</p>
+                                <p class="text-xs text-muted">Obtendra la info al instante</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <button onclick="loadSampleData()" class="animate-slide-up stagger-4 mt-auto text-muted text-xs underline underline-offset-4 hover:text-accent transition-colors py-4 text-center">
+                    Cargar datos de ejemplo para probar
+                </button>
+            </div>
+        </div>
+
+        <!-- ========== PANTALLA: CONSULTA ========== -->
+        <div id="screenScan" class="hidden flex-1 flex flex-col">
+            <header class="flex items-center justify-between px-5 pt-4 pb-3 bg-bg/80 backdrop-blur-md sticky top-0 z-20">
+                <div class="flex items-center gap-2">
+                    <span class="material-icons-round text-accent" style="font-size:22px;">inventory_2</span>
+                    <span class="font-bold text-lg">InvenScan</span>
+                </div>
+                <button onclick="showSettings()" class="w-9 h-9 rounded-xl bg-card border border-border flex items-center justify-center text-muted hover:text-fg transition-colors" aria-label="Configuracion">
+                    <span class="material-icons-round" style="font-size:18px;">settings</span>
+                </button>
+            </header>
+
+            <div class="flex-1 overflow-y-auto px-4 pb-4 space-y-4">
+                <!-- Buscador principal -->
+                <div class="search-hero animate-slide-up">
+                    <p class="text-sm text-muted mb-3 font-medium">Ingrese el codigo a consultar</p>
+                    <div class="relative">
+                        <span class="material-icons-round absolute left-4 top-1/2 -translate-y-1/2 text-muted" style="font-size:20px;">search</span>
+                        <input type="text" id="mainSearchInput" class="search-input-lg" placeholder="Escriba o pegue el codigo..." aria-label="Codigo de busqueda" autocomplete="off">
+                        <button onclick="pasteFromClipboard()" class="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-lg bg-card border border-border flex items-center justify-center text-muted hover:text-accent transition-colors" aria-label="Pegar del portapapeles">
+                            <span class="material-icons-round" style="font-size:18px;">content_paste</span>
+                        </button>
+                    </div>
+                    <button onclick="executeSearch()" class="w-full mt-3 py-3 rounded-xl bg-accent text-bg font-bold text-sm hover:bg-accent/90 transition-all active:scale-95 flex items-center justify-center gap-2">
+                        <span class="material-icons-round" style="font-size:18px;">manage_search</span>
+                        Consultar
+                    </button>
+                </div>
+
+                <!-- Resultado -->
+                <div id="resultArea" class="space-y-3">
+                    <div id="resultPlaceholder" class="text-center py-8">
+                        <span class="material-icons-round text-muted/20 mb-2 block" style="font-size:56px;">search</span>
+                        <p class="text-muted text-sm">Ingrese un codigo para consultar</p>
+                        <p class="text-muted/50 text-xs mt-1">Los resultados apareceran aqui</p>
+                    </div>
+                    <div id="resultCard" class="hidden result-card p-4"></div>
+                </div>
+
+                <!-- Consultas rápidas -->
+                <div id="quickAccess" class="hidden">
+                    <p class="text-xs text-muted/60 uppercase tracking-wider font-semibold mb-3 px-1">Consultas recientes</p>
+                    <div id="quickChips" class="flex flex-wrap gap-2"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== PANTALLA: HISTORIAL ========== -->
+        <div id="screenHistory" class="hidden flex-1 flex flex-col">
+            <header class="flex items-center justify-between px-5 pt-4 pb-3 bg-bg/80 backdrop-blur-md sticky top-0 z-20">
+                <div class="flex items-center gap-2">
+                    <span class="material-icons-round text-accent" style="font-size:22px;">history</span>
+                    <span class="font-bold text-lg">Historial</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span id="historyCount" class="badge bg-card border border-border text-muted text-xs">0</span>
+                    <button onclick="clearHistory()" class="text-muted hover:text-danger transition-colors p-1" aria-label="Limpiar historial">
+                        <span class="material-icons-round" style="font-size:20px;">delete_sweep</span>
+                    </button>
+                </div>
+            </header>
+
+            <div class="px-4 pb-3">
+                <div class="relative">
+                    <span class="material-icons-round absolute left-3 top-1/2 -translate-y-1/2 text-muted" style="font-size:18px;">search</span>
+                    <input type="text" id="historySearch" placeholder="Buscar en historial..." class="manual-input pl-10 text-sm" oninput="filterHistory()" aria-label="Buscar en historial">
+                </div>
+            </div>
+
+            <div id="historyList" class="flex-1 overflow-y-auto px-4 pb-4 space-y-2">
+                <div class="text-center py-12">
+                    <span class="material-icons-round text-muted/30 mb-2 block" style="font-size:48px;">inbox</span>
+                    <p class="text-muted text-sm">Sin registros aun</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== PANTALLA: ESTADÍSTICAS ========== -->
+        <div id="screenStats" class="hidden flex-1 flex flex-col">
+            <header class="flex items-center gap-2 px-5 pt-4 pb-3 bg-bg/80 backdrop-blur-md sticky top-0 z-20">
+                <span class="material-icons-round text-accent" style="font-size:22px;">analytics</span>
+                <span class="font-bold text-lg">Estadisticas</span>
+            </header>
+
+            <div class="flex-1 overflow-y-auto px-4 pb-4 space-y-4 pt-2" id="statsScrollContainer">
+                <!-- Resumen -->
+                <div class="flex gap-3">
+                    <div class="stat-card">
+                        <p class="text-muted text-xs mb-1">Total</p>
+                        <p id="statTotal" class="text-2xl font-bold font-mono text-accent">0</p>
+                    </div>
+                    <div class="stat-card">
+                        <p class="text-muted text-xs mb-1">Encontrados</p>
+                        <p id="statFound" class="text-2xl font-bold font-mono text-green-400">0</p>
+                    </div>
+                    <div class="stat-card">
+                        <p class="text-muted text-xs mb-1">No encontr.</p>
+                        <p id="statNotFound" class="text-2xl font-bold font-mono text-danger">0</p>
+                    </div>
+                </div>
+
+                <!-- Sedes más consultadas -->
+                <div class="result-card p-4">
+                    <p class="text-xs text-muted uppercase tracking-wider font-semibold mb-3">Sedes mas consultadas</p>
+                    <div id="storeStats" class="space-y-2">
+                        <p class="text-muted text-sm text-center py-4">Sin datos suficientes</p>
+                    </div>
+                </div>
+
+                <!-- Reporte de registros -->
+                <div class="result-card p-4">
+                    <div class="flex items-center justify-between mb-1">
+                        <p class="text-xs text-muted uppercase tracking-wider font-semibold">Reporte de registros</p>
+                        <span id="selectedCountBadge" class="badge bg-card border border-border text-muted text-xs hidden">0</span>
+                    </div>
+                    <div class="flex items-center justify-between mb-3">
+                        <label class="flex items-center gap-2 cursor-pointer text-xs text-muted">
+                            <input type="checkbox" class="custom-check" id="selectAllCheck" onchange="toggleSelectAll()">
+                            Seleccionar todos
+                        </label>
+                        <button onclick="clearSelection()" id="btnClearSel" class="text-xs text-muted hover:text-danger transition-colors hidden">
+                            Limpiar
+                        </button>
+                    </div>
+                    <div id="reportList" class="space-y-2 max-h-[400px] overflow-y-auto">
+                        <p class="text-muted text-sm text-center py-6">Sin registros para mostrar</p>
+                    </div>
+                </div>
+
+                <!-- Barra flotante de PDF -->
+                <div id="pdfBar" class="pdf-bar">
+                    <button onclick="generatePDF()" class="w-full py-3.5 rounded-xl bg-accent text-bg font-bold text-sm hover:bg-accent/90 transition-all active:scale-95 flex items-center justify-center gap-2 shadow-lg shadow-accent/20">
+                        <span class="material-icons-round" style="font-size:20px;">picture_as_pdf</span>
+                        Generar reporte PDF
+                        <span id="pdfCountText" class="badge bg-bg/20 text-bg text-xs ml-1"></span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== BARRA DE NAVEGACIÓN ========== -->
+        <nav id="bottomNav" class="hidden bg-surface/90 backdrop-blur-md border-t border-border px-2 py-2 pb-[max(8px,env(safe-area-inset-bottom))]">
+            <div class="flex justify-around">
+                <button class="nav-btn active" data-screen="screenScan" onclick="switchScreen('screenScan')" aria-label="Consultar">
+                    <span class="material-icons-round" style="font-size:24px;">manage_search</span>
+                    <span class="text-[10px] font-medium">Consultar</span>
+                </button>
+                <button class="nav-btn" data-screen="screenHistory" onclick="switchScreen('screenHistory')" aria-label="Historial">
+                    <span class="material-icons-round" style="font-size:24px;">history</span>
+                    <span class="text-[10px] font-medium">Historial</span>
+                </button>
+                <button class="nav-btn" data-screen="screenStats" onclick="switchScreen('screenStats')" aria-label="Estadisticas">
+                    <span class="material-icons-round" style="font-size:24px;">analytics</span>
+                    <span class="text-[10px] font-medium">Estadisticas</span>
+                </button>
+            </div>
+        </nav>
+    </div>
+
+    <!-- ========== MODAL: CONFIGURACIÓN ========== -->
+    <div id="modalSettings" class="modal-overlay" onclick="if(event.target===this)closeModal('modalSettings')">
+        <div class="modal-sheet">
+            <div class="modal-handle"></div>
+            <h3 class="font-bold text-lg mb-4">Configuracion</h3>
+            <div class="space-y-4">
+                <div>
+                    <p class="text-sm font-medium mb-2">Base de datos</p>
+                    <button onclick="reloadFile()" class="w-full py-3 rounded-xl bg-card border border-border text-sm font-medium hover:bg-border transition-colors flex items-center justify-center gap-2">
+                        <span class="material-icons-round" style="font-size:18px;">swap_horiz</span>
+                        Cambiar archivo Excel
+                    </button>
+                    <p id="settingsFileInfo" class="text-xs text-muted mt-2"></p>
+                </div>
+                <div>
+                    <label class="text-sm font-medium mb-2 block">Columna de codigo</label>
+                    <select id="settingsCodeColumn" class="manual-input text-sm appearance-none cursor-pointer" onchange="changeCodeColumn(this.value)" aria-label="Cambiar columna de codigo"></select>
+                </div>
+                <div class="flex items-center justify-between py-2">
+                    <div>
+                        <p class="text-sm font-medium">Vibrar al consultar</p>
+                        <p class="text-xs text-muted">Retroalimentacion haptica</p>
+                    </div>
+                    <button id="btnVibrate" onclick="toggleVibration()" class="w-12 h-7 rounded-full bg-accent relative transition-colors" aria-label="Toggle vibracion">
+                        <div class="w-5 h-5 rounded-full bg-white absolute top-1 transition-all" style="left:24px;" id="vibrateKnob"></div>
+                    </button>
+                </div>
+                <div class="flex items-center justify-between py-2">
+                    <div>
+                        <p class="text-sm font-medium">Sonido al consultar</p>
+                        <p class="text-xs text-muted">Beep de confirmacion</p>
+                    </div>
+                    <button id="btnSound" onclick="toggleSound()" class="w-12 h-7 rounded-full bg-accent relative transition-colors" aria-label="Toggle sonido">
+                        <div class="w-5 h-5 rounded-full bg-white absolute top-1 transition-all" style="left:24px;" id="soundKnob"></div>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== MODAL: DETALLE COMPLETO ========== -->
+    <div id="modalDetail" class="modal-overlay" onclick="if(event.target===this)closeModal('modalDetail')">
+        <div class="modal-sheet">
+            <div class="modal-handle"></div>
+            <div id="detailContent"></div>
+        </div>
+    </div>
+
+
+    <script>
+        // ===== ESTADO GLOBAL =====
+        const state = {
+            dbData: [],
+            columns: [],
+            codeColumn: '',
+            fileName: '',
+            history: [],
+            vibrationOn: true,
+            soundOn: true,
+            selectedForReport: new Set(),
+        };
+
+        // ===== Mapeo inteligente de columnas =====
+        function findColumn(...keywords) {
+            if (!state.columns.length) return null;
+            const normalize = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+            for (const kw of keywords) {
+                const found = state.columns.find(c => normalize(c).includes(normalize(kw)));
+                if (found) return found;
+            }
+            return null;
+        }
+
+        function getReportColumns() {
+            return {
+                codigo: findColumn('codigo2025', 'codigo_2025', '2025') || state.codeColumn,
+                sede: findColumn('sede', 'tienda', 'localidad', 'local', 'oficina', 'almacen'),
+                descripcion: findColumn('descripcion', 'desc', 'nombre', 'detalle', 'bien'),
+                placa: findColumn('placa', 'plate', 'etiqueta', 'tag', 'numero_placa', 'nro_placa'),
+            };
+        }
+
+        // ===== PARTÍCULAS DE FONDO =====
+        (function initParticles() {
+            const container = document.getElementById('bgParticles');
+            for (let i = 0; i < 10; i++) {
+                const p = document.createElement('div');
+                p.className = 'particle';
+                const size = Math.random() * 100 + 40;
+                p.style.width = size + 'px';
+                p.style.height = size + 'px';
+                p.style.left = Math.random() * 100 + '%';
+                p.style.top = Math.random() * 100 + '%';
+                p.style.animationDelay = Math.random() * 6 + 's';
+                p.style.animationDuration = (Math.random() * 4 + 4) + 's';
+                container.appendChild(p);
+            }
+        })();
+
+        // ===== TOAST =====
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = 'toast ' + type;
+            requestAnimationFrame(() => toast.classList.add('show'));
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        // ===== MODALES =====
+        function openModal(id) { document.getElementById(id).classList.add('show'); }
+        function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+        function showSettings() {
+            document.getElementById('settingsFileInfo').textContent =
+                state.fileName ? `${state.fileName} — ${state.dbData.length} registros` : 'Sin archivo cargado';
+            openModal('modalSettings');
+        }
+
+        // ===== NAVEGACIÓN =====
+        function switchScreen(screenId) {
+            ['screenSetup', 'screenScan', 'screenHistory', 'screenStats'].forEach(id => {
+                document.getElementById(id).classList.add('hidden');
+            });
+            document.getElementById(screenId).classList.remove('hidden');
+            document.querySelectorAll('.nav-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.screen === screenId);
+            });
+            document.getElementById('bottomNav').classList.toggle('hidden', screenId === 'screenSetup');
+
+            if (screenId === 'screenScan') {
+                setTimeout(() => document.getElementById('mainSearchInput').focus(), 300);
+                renderQuickAccess();
+            }
+            if (screenId === 'screenHistory') renderHistory();
+            if (screenId === 'screenStats') { renderStats(); renderReportList(); }
+        }
+
+        // ===== CARGA DE ARCHIVO EXCEL =====
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+
+        dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+        dropZone.addEventListener('drop', e => {
+            e.preventDefault(); dropZone.classList.remove('drag-over');
+            if (e.dataTransfer.files.length) processFile(e.dataTransfer.files[0]);
+        });
+        fileInput.addEventListener('change', e => { if (e.target.files.length) processFile(e.target.files[0]); });
+
+        function processFile(file) {
+            const validExts = ['.xlsx', '.xls', '.csv'];
+            const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+            if (!validExts.includes(ext)) {
+                showToast('Formato no soportado. Use .xlsx, .xls o .csv', 'error');
+                return;
+            }
+            state.fileName = file.name;
+            const reader = new FileReader();
+            reader.onload = e => {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: '' });
+                    if (!json.length) { showToast('El archivo esta vacio', 'error'); return; }
+
+                    state.dbData = json;
+                    state.columns = Object.keys(json[0]);
+
+                    document.getElementById('fileName').textContent = file.name;
+                    document.getElementById('fileStats').textContent = `${json.length} registros — ${state.columns.length} columnas`;
+                    document.getElementById('columnTags').innerHTML = state.columns.map(col =>
+                        `<span class="badge bg-card border border-border text-muted text-xs">${col}</span>`
+                    ).join('');
+
+                    populateCodeColumnSelect();
+                    document.getElementById('settingsCodeColumn').innerHTML = document.getElementById('codeColumnSelect').innerHTML;
+                    document.getElementById('dropZone').classList.add('hidden');
+                    document.getElementById('fileInfo').classList.remove('hidden');
+                    showToast(`Archivo cargado: ${json.length} registros`, 'success');
+                } catch (err) {
+                    showToast('Error al leer el archivo: ' + err.message, 'error');
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function populateCodeColumnSelect() {
+            const select = document.getElementById('codeColumnSelect');
+            select.innerHTML = '';
+            state.columns.forEach(col => {
+                const opt = document.createElement('option');
+                opt.value = col; opt.textContent = col;
+                const lower = col.toLowerCase();
+                if (lower.includes('codigo') || lower.includes('código') || lower.includes('code') ||
+                    lower.includes('barcode') || lower.includes('barra') || lower.includes('sku')) {
+                    opt.selected = true; state.codeColumn = col;
+                }
+                select.appendChild(opt);
+            });
+            if (!state.codeColumn && state.columns.length) {
+                state.codeColumn = state.columns[0];
+                select.value = state.codeColumn;
+            }
+        }
+
+        function removeFile() {
+            state.dbData = []; state.columns = []; state.codeColumn = ''; state.fileName = '';
+            fileInput.value = '';
+            document.getElementById('dropZone').classList.remove('hidden');
+            document.getElementById('fileInfo').classList.add('hidden');
+            showToast('Archivo eliminado', 'info');
+        }
+
+        function reloadFile() { closeModal('modalSettings'); switchScreen('screenSetup'); }
+
+        function changeCodeColumn(val) {
+            state.codeColumn = val;
+            document.getElementById('codeColumnSelect').value = val;
+            showToast('Columna de codigo actualizada', 'success');
+        }
+
+        // ===== DATOS DE EJEMPLO =====
+        function loadSampleData() {
+            const sampleData = [
+                { codigo_bien: '7501000123456', codigo_2025: 'INV-2025-0001', descripcion: 'Monitor LED 24 pulgadas Full HD', marca: 'Dell', modelo: 'S2421HN', sede: 'Almacen Central', ubicacion: 'Piso 2 - Seccion A', estado: 'Bueno', responsable: 'Juan Perez', placa: 'PL-001-A' },
+                { codigo_bien: '7501000234567', codigo_2025: 'INV-2025-0002', descripcion: 'Teclado mecanico inalambrico', marca: 'Logitech', modelo: 'MK295', sede: 'Sucursal Norte', ubicacion: 'Mostrador 3', estado: 'Bueno', responsable: 'Maria Lopez', placa: 'PL-002-B' },
+                { codigo_bien: '7501000345678', codigo_2025: 'INV-2025-0003', descripcion: 'Mouse optico USB', marca: 'HP', modelo: 'X1000', sede: 'Almacen Central', ubicacion: 'Piso 1 - Deposito', estado: 'Regular', responsable: 'Carlos Ruiz', placa: 'PL-003-A' },
+                { codigo_bien: '7501000456789', codigo_2025: 'INV-2025-0004', descripcion: 'Silla ergonomica ejecutiva', marca: 'Herman Miller', modelo: 'Aeron', sede: 'Sucursal Sur', ubicacion: 'Oficina 201', estado: 'Excelente', responsable: 'Ana Torres', placa: 'PL-004-C' },
+                { codigo_bien: '7501000567890', codigo_2025: 'INV-2025-0005', descripcion: 'Impresora laser monocromatica', marca: 'Brother', modelo: 'HL-L2350DW', sede: 'Almacen Central', ubicacion: 'Piso 3 - Copiadora', estado: 'Bueno', responsable: 'Luis Garcia', placa: 'PL-005-A' },
+                { codigo_bien: '7501000678901', codigo_2025: 'INV-2025-0006', descripcion: 'Regulador de voltaje 1000VA', marca: 'APC', modelo: 'BE600M1', sede: 'Sucursal Norte', ubicacion: 'Rack Principal', estado: 'Bueno', responsable: 'Pedro Sanchez', placa: 'PL-006-B' },
+                { codigo_bien: '7501000789012', codigo_2025: 'INV-2025-0007', descripcion: 'Camara de seguridad IP', marca: 'Hikvision', modelo: 'DS-2CD2143G2', sede: 'Almacen Central', ubicacion: 'Exterior - Puerta 1', estado: 'Bueno', responsable: 'Rosa Martinez', placa: 'PL-007-A' },
+                { codigo_bien: '7501000890123', codigo_2025: 'INV-2025-0008', descripcion: 'Servidor rack 2U Xeon', marca: 'Dell', modelo: 'PowerEdge R640', sede: 'Centro de Datos', ubicacion: 'Rack A3 - U14', estado: 'Excelente', responsable: 'Jorge Ramirez', placa: 'PL-008-D' },
+                { codigo_bien: '7501000901234', codigo_2025: 'INV-2025-0009', descripcion: 'Switch gestionable 24 puertos', marca: 'Cisco', modelo: 'SG350-24', sede: 'Centro de Datos', ubicacion: 'Rack B1 - U8', estado: 'Bueno', responsable: 'Jorge Ramirez', placa: 'PL-009-D' },
+                { codigo_bien: '7501000012345', codigo_2025: 'INV-2025-0010', descripcion: 'Extintor polvo quimico 5kg', marca: 'Buckeye', modelo: 'PQ-5', sede: 'Sucursal Sur', ubicacion: 'Paso de emergencia', estado: 'Vencido', responsable: 'Ana Torres', placa: 'PL-010-C' },
+                { codigo_bien: '7501000111222', codigo_2025: 'INV-2025-0011', descripcion: 'Escritorio ejecutivo L-shape', marca: 'Steelcase', modelo: 'Criterion', sede: 'Sucursal Norte', ubicacion: 'Oficina 105', estado: 'Regular', responsable: 'Maria Lopez', placa: 'PL-011-B' },
+                { codigo_bien: '7501000222333', codigo_2025: 'INV-2025-0012', descripcion: 'Laptop i7 16GB RAM 512GB SSD', marca: 'Lenovo', modelo: 'ThinkPad T14', sede: 'Almacen Central', ubicacion: 'Piso 2 - Seccion B', estado: 'Bueno', responsable: 'Juan Perez', placa: 'PL-012-A' },
+            ];
+
+            state.dbData = sampleData;
+            state.columns = Object.keys(sampleData[0]);
+            state.codeColumn = 'codigo_bien';
+            state.fileName = 'ejemplo_inventario.xlsx';
+
+            document.getElementById('fileName').textContent = state.fileName;
+            document.getElementById('fileStats').textContent = `${sampleData.length} registros — ${state.columns.length} columnas`;
+            document.getElementById('columnTags').innerHTML = state.columns.map(col =>
+                `<span class="badge bg-card border border-border text-muted text-xs">${col}</span>`
+            ).join('');
+
+            populateCodeColumnSelect();
+            document.getElementById('settingsCodeColumn').innerHTML = document.getElementById('codeColumnSelect').innerHTML;
+            document.getElementById('dropZone').classList.add('hidden');
+            document.getElementById('fileInfo').classList.remove('hidden');
+            showToast('Datos de ejemplo cargados correctamente', 'success');
+        }
+
+        // ===== INICIAR APP =====
+        function startApp() {
+            if (!state.dbData.length) { showToast('No hay datos cargados', 'error'); return; }
+            state.codeColumn = document.getElementById('codeColumnSelect').value;
+            switchScreen('screenScan');
+        }
+
+        // ===== CONSULTA MANUAL =====
+        async function pasteFromClipboard() {
+            try {
+                const text = await navigator.clipboard.readText();
+                document.getElementById('mainSearchInput').value = text.trim();
+                showToast('Codigo pegado del portapapeles', 'success');
+            } catch {
+                showToast('No se pudo acceder al portapapeles', 'error');
+            }
+        }
+
+        function executeSearch() {
+            const code = document.getElementById('mainSearchInput').value.trim();
+            if (!code) { showToast('Ingrese un codigo para consultar', 'error'); return; }
+            handleSearchResult(code);
+        }
+
+        // Enter para buscar
+        document.getElementById('mainSearchInput').addEventListener('keydown', e => {
+            if (e.key === 'Enter') executeSearch();
+        });
+
+        function handleSearchResult(code) {
+            if (state.vibrationOn && navigator.vibrate) navigator.vibrate(80);
+            if (state.soundOn) playBeep();
+
+            const record = state.dbData.find(row => String(row[state.codeColumn]).trim() === code);
+            const timestamp = new Date();
+
+            state.history.unshift({ code, found: !!record, record, time: timestamp });
+            if (state.history.length > 200) state.history.pop();
+
+            renderResult(code, record, timestamp);
+            renderQuickAccess();
+            saveState();
+        }
+
+        function renderResult(code, record, timestamp) {
+            const placeholder = document.getElementById('resultPlaceholder');
+            const card = document.getElementById('resultCard');
+            placeholder.classList.add('hidden');
+            card.classList.remove('hidden', 'found', 'not-found');
+
+            if (record) {
+                card.classList.add('found');
+                const estadoVal = String(record.estado || '').toLowerCase();
+                let estadoColor = 'bg-accent/15 text-accent';
+                if (estadoVal.includes('regular')) estadoColor = 'bg-warm/15 text-warm';
+                if (estadoVal.includes('mal') || estadoVal.includes('venc') || estadoVal.includes('dan')) estadoColor = 'bg-danger/15 text-danger';
+                if (estadoVal.includes('excel')) estadoColor = 'bg-info/15 text-info';
+
+                const mainFields = state.columns.filter(c => c !== state.codeColumn).slice(0, 4);
+                const extraFields = state.columns.filter(c => c !== state.codeColumn).slice(4);
+
+                card.innerHTML = `
+                    <div class="animate-bounce-in">
+                        <div class="flex items-start justify-between mb-3">
+                            <div class="flex items-center gap-2">
+                                <span class="material-icons-round text-accent" style="font-size:20px;">check_circle</span>
+                                <span class="text-sm font-bold text-accent">Encontrado</span>
+                            </div>
+                            <span class="badge ${estadoColor}">${record.estado || 'N/A'}</span>
+                        </div>
+                        <p class="font-bold text-lg mb-1 leading-snug">${record.descripcion || 'Sin descripcion'}</p>
+                        <p class="font-mono text-sm text-muted mb-3">${code}</p>
+                        <div class="border-t border-border">
+                            ${mainFields.map(f => `
+                                <div class="field-row">
+                                    <span class="text-xs text-muted uppercase tracking-wider flex-shrink-0 mr-3">${f}</span>
+                                    <span class="text-sm font-medium text-right break-words">${record[f] || '—'}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                        ${extraFields.length > 0 ? `
+                            <button onclick="showFullDetail('${code}')" class="w-full mt-3 py-2 rounded-lg bg-card border border-border text-xs text-muted hover:text-fg hover:border-accent/30 transition-all flex items-center justify-center gap-1">
+                                <span class="material-icons-round" style="font-size:14px;">expand_more</span>
+                                Ver todos los campos (${extraFields.length} mas)
+                            </button>
+                        ` : ''}
+                        <p class="text-[10px] text-muted/50 mt-3 text-right">${formatTime(timestamp)}</p>
+                    </div>
+                `;
+            } else {
+                card.classList.add('not-found');
+                card.innerHTML = `
+                    <div class="animate-bounce-in">
+                        <div class="flex items-center gap-2 mb-3">
+                            <span class="material-icons-round text-danger" style="font-size:20px;">cancel</span>
+                            <span class="text-sm font-bold text-danger">No encontrado</span>
+                        </div>
+                        <p class="font-mono text-lg mb-2">${code}</p>
+                        <p class="text-sm text-muted">Este codigo no existe en la base de datos actual.</p>
+                        <p class="text-[10px] text-muted/50 mt-3 text-right">${formatTime(timestamp)}</p>
+                    </div>
+                `;
+            }
+        }
+
+        function showFullDetail(code) {
+            const record = state.dbData.find(row => String(row[state.codeColumn]).trim() === code);
+            if (!record) return;
+            document.getElementById('detailContent').innerHTML = `
+                <h3 class="font-bold text-lg mb-1">${record.descripcion || 'Sin descripcion'}</h3>
+                <p class="font-mono text-sm text-muted mb-4">${code}</p>
+                <div class="space-y-0">
+                    ${state.columns.map(col => `
+                        <div class="field-row">
+                            <span class="text-xs text-muted uppercase tracking-wider flex-shrink-0 mr-3">${col}</span>
+                            <span class="text-sm font-medium text-right break-words">${record[col] || '—'}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+            openModal('modalDetail');
+        }
+
+        // ===== CONSULTAS RÁPIDAS =====
+        function renderQuickAccess() {
+            const recent = state.history.slice(0, 8);
+            const container = document.getElementById('quickAccess');
+            const chips = document.getElementById('quickChips');
+
+            if (recent.length === 0) { container.classList.add('hidden'); return; }
+            container.classList.remove('hidden');
+
+            const uniqueCodes = [...new Set(recent.map(h => h.code))];
+            chips.innerHTML = uniqueCodes.map(code => `
+                <button onclick="document.getElementById('mainSearchInput').value='${code}';executeSearch();"
+                        class="badge bg-card border border-border text-muted text-xs hover:border-accent/30 hover:text-fg transition-all py-1.5 px-3 cursor-pointer active:scale-95">
+                    ${code.length > 18 ? code.slice(0, 18) + '...' : code}
+                </button>
+            `).join('');
+        }
+
+        // ===== HISTORIAL =====
+        function renderHistory() {
+            const list = document.getElementById('historyList');
+            const count = document.getElementById('historyCount');
+            const filtered = getFilteredHistory();
+            count.textContent = state.history.length;
+
+            if (!state.history.length) {
+                list.innerHTML = `<div class="text-center py-12"><span class="material-icons-round text-muted/30 mb-2 block" style="font-size:48px;">inbox</span><p class="text-muted text-sm">Sin registros aun</p></div>`;
+                return;
+            }
+            if (!filtered.length) {
+                list.innerHTML = `<div class="text-center py-12"><span class="material-icons-round text-muted/30 mb-2 block" style="font-size:48px;">search_off</span><p class="text-muted text-sm">Sin resultados</p></div>`;
+                return;
+            }
+
+            list.innerHTML = filtered.map((entry, i) => {
+                const idx = state.history.indexOf(entry);
+                return `
+                <div class="history-item animate-slide-up" style="animation-delay:${Math.min(i * 0.03, 0.3)}s;opacity:0;" onclick="showHistoryDetail(${idx})">
+                    <div class="flex items-start gap-3">
+                        <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${entry.found ? 'bg-accent/10' : 'bg-danger/10'}">
+                            <span class="material-icons-round ${entry.found ? 'text-accent' : 'text-danger'}" style="font-size:18px;">${entry.found ? 'check_circle' : 'cancel'}</span>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <p class="text-sm font-semibold truncate">${entry.found ? (entry.record.descripcion || entry.code) : 'No encontrado'}</p>
+                            <p class="font-mono text-xs text-muted truncate">${entry.code}</p>
+                            ${entry.found && entry.record.sede ? `<p class="text-xs text-muted/70 mt-0.5">${entry.record.sede}</p>` : ''}
+                        </div>
+                        <span class="text-[10px] text-muted/50 flex-shrink-0 mt-1">${formatTimeShort(entry.time)}</span>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        function getFilteredHistory() {
+            const q = document.getElementById('historySearch').value.trim().toLowerCase();
+            if (!q) return state.history;
+            return state.history.filter(e =>
+                e.code.toLowerCase().includes(q) ||
+                (e.record && e.record.descripcion && e.record.descripcion.toLowerCase().includes(q)) ||
+                (e.record && e.record.sede && e.record.sede.toLowerCase().includes(q))
+            );
+        }
+
+        function filterHistory() { renderHistory(); }
+
+        function showHistoryDetail(index) {
+            const entry = state.history[index];
+            if (!entry) return;
+            const content = document.getElementById('detailContent');
+            if (entry.found && entry.record) {
+                content.innerHTML = `
+                    <div class="flex items-center gap-2 mb-3">
+                        <span class="material-icons-round text-accent" style="font-size:20px;">check_circle</span>
+                        <span class="text-sm font-bold text-accent">Encontrado</span>
+                        <span class="text-xs text-muted ml-auto">${formatTime(entry.time)}</span>
+                    </div>
+                    <h3 class="font-bold text-lg mb-1">${entry.record.descripcion || 'Sin descripcion'}</h3>
+                    <p class="font-mono text-sm text-muted mb-4">${entry.code}</p>
+                    <div class="space-y-0">
+                        ${state.columns.map(col => `
+                            <div class="field-row">
+                                <span class="text-xs text-muted uppercase tracking-wider flex-shrink-0 mr-3">${col}</span>
+                                <span class="text-sm font-medium text-right break-words">${entry.record[col] || '—'}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            } else {
+                content.innerHTML = `
+                    <div class="text-center py-8">
+                        <span class="material-icons-round text-danger mb-3 block" style="font-size:48px;">cancel</span>
+                        <p class="font-bold text-lg mb-1">No encontrado</p>
+                        <p class="font-mono text-muted">${entry.code}</p>
+                        <p class="text-xs text-muted/50 mt-3">${formatTime(entry.time)}</p>
+                    </div>
+                `;
+            }
+            openModal('modalDetail');
+        }
+
+        function clearHistory() {
+            if (!state.history.length) return;
+            state.history = [];
+            state.selectedForReport.clear();
+            renderHistory();
+            saveState();
+            showToast('Historial limpiado', 'info');
+        }
+
+        // ===== ESTADÍSTICAS =====
+        function renderStats() {
+            const total = state.history.length;
+            const found = state.history.filter(h => h.found).length;
+            document.getElementById('statTotal').textContent = total;
+            document.getElementById('statFound').textContent = found;
+            document.getElementById('statNotFound').textContent = total - found;
+
+            // Sedes más consultadas
+            const storeCounts = {};
+            state.history.forEach(h => {
+                if (h.found && h.record) {
+                    const cols = getReportColumns();
+                    const sede = h.record[cols.sede] || h.record.tienda || 'Sin sede';
+                    if (sede) storeCounts[sede] = (storeCounts[sede] || 0) + 1;
+                }
+            });
+
+            const storeStats = document.getElementById('storeStats');
+            const storeEntries = Object.entries(storeCounts).sort((a, b) => b[1] - a[1]).slice(0, 6);
+
+            if (!storeEntries.length) {
+                storeStats.innerHTML = '<p class="text-muted text-sm text-center py-4">Sin datos suficientes</p>';
+            } else {
+                const maxCount = storeEntries[0][1];
+                storeStats.innerHTML = storeEntries.map(([store, count]) => `
+                    <div class="flex items-center gap-3">
+                        <span class="text-xs text-muted w-28 truncate flex-shrink-0">${store}</span>
+                        <div class="flex-1 h-6 bg-card rounded-lg overflow-hidden relative">
+                            <div class="h-full bg-accent/20 rounded-lg transition-all duration-700" style="width:${(count / maxCount) * 100}%"></div>
+                            <span class="absolute inset-0 flex items-center justify-end pr-2 text-xs font-mono font-bold text-accent">${count}</span>
+                        </div>
+                    </div>
+                `).join('');
+            }
+        }
+
+        // ===== LISTA DE REPORTE (SELECCIONABLE) =====
+        function renderReportList() {
+            const list = document.getElementById('reportList');
+            const foundEntries = state.history.filter(h => h.found && h.record);
+
+            if (!foundEntries.length) {
+                list.innerHTML = '<p class="text-muted text-sm text-center py-6">Sin registros encontrados para mostrar</p>';
+                updatePdfBar();
+                return;
+            }
+
+            const cols = getReportColumns();
+
+            list.innerHTML = foundEntries.map((entry, i) => {
+                const globalIdx = state.history.indexOf(entry);
+                const isSelected = state.selectedForReport.has(globalIdx);
+                const codigo = entry.record[cols.codigo] || '—';
+                const sede = entry.record[cols.sede] || '—';
+                const desc = entry.record[cols.descripcion] || '—';
+                const placa = entry.record[cols.placa] || '—';
+
+                return `
+                <div class="report-row ${isSelected ? 'selected' : ''} animate-slide-right" style="animation-delay:${Math.min(i * 0.02, 0.4)}s;opacity:0;" onclick="toggleReportRow(${globalIdx}, this)">
+                    <div class="flex items-start gap-3">
+                        <input type="checkbox" class="custom-check mt-0.5" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation();toggleReportRow(${globalIdx}, this.closest('.report-row'))" aria-label="Seleccionar registro">
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-2 mb-1">
+                                <span class="font-mono text-xs font-bold text-accent">${codigo}</span>
+                            </div>
+                            <p class="text-sm font-medium truncate">${desc}</p>
+                            <div class="flex items-center gap-3 mt-1">
+                                <span class="text-xs text-muted flex items-center gap-1">
+                                    <span class="material-icons-round" style="font-size:12px;">store</span>${sede}
+                                </span>
+                                <span class="text-xs text-muted flex items-center gap-1">
+                                    <span class="material-icons-round" style="font-size:12px;">badge</span>${placa}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+            }).join('');
+
+            // Sincronizar "Seleccionar todos"
+            const allCheckboxes = list.querySelectorAll('.custom-check');
+            const allFound = foundEntries.length > 0 && foundEntries.every(e => state.selectedForReport.has(state.history.indexOf(e)));
+            document.getElementById('selectAllCheck').checked = allFound;
+
+            updatePdfBar();
+        }
+
+        function toggleReportRow(globalIdx, rowEl) {
+            if (state.selectedForReport.has(globalIdx)) {
+                state.selectedForReport.delete(globalIdx);
+            } else {
+                state.selectedForReport.add(globalIdx);
+            }
+
+            // Actualizar visual
+            if (rowEl) {
+                rowEl.classList.toggle('selected', state.selectedForReport.has(globalIdx));
+                const cb = rowEl.querySelector('.custom-check');
+                if (cb) cb.checked = state.selectedForReport.has(globalIdx);
+            }
+
+            // Sincronizar selectAll
+            const foundEntries = state.history.filter(h => h.found && h.record);
+            const allFound = foundEntries.length > 0 && foundEntries.every(e => state.selectedForReport.has(state.history.indexOf(e)));
+            document.getElementById('selectAllCheck').checked = allFound;
+
+            updatePdfBar();
+        }
+
+        function toggleSelectAll() {
+            const checked = document.getElementById('selectAllCheck').checked;
+            const foundEntries = state.history.filter(h => h.found && h.record);
+
+            foundEntries.forEach(entry => {
+                const idx = state.history.indexOf(entry);
+                if (checked) state.selectedForReport.add(idx);
+                else state.selectedForReport.delete(idx);
+            });
+
+            renderReportList();
+        }
+
+        function clearSelection() {
+            state.selectedForReport.clear();
+            renderReportList();
+        }
+
+        function updatePdfBar() {
+            const count = state.selectedForReport.size;
+            const bar = document.getElementById('pdfBar');
+            const badge = document.getElementById('selectedCountBadge');
+            const btnClear = document.getElementById('btnClearSel');
+            const pdfText = document.getElementById('pdfCountText');
+
+            if (count > 0) {
+                bar.classList.add('visible');
+                badge.classList.remove('hidden');
+                badge.textContent = count + ' seleccionado' + (count > 1 ? 's' : '');
+                btnClear.classList.remove('hidden');
+                pdfText.textContent = count;
+            } else {
+                bar.classList.remove('visible');
+                badge.classList.add('hidden');
+                btnClear.classList.add('hidden');
+                pdfText.textContent = '';
+            }
+        }
+
+        // ===== GENERACIÓN DE PDF =====
+        function generatePDF() {
+            if (state.selectedForReport.size === 0) {
+                showToast('Seleccione al menos un registro', 'error');
+                return;
+            }
+
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+
+            const cols = getReportColumns();
+            const selectedEntries = [...state.selectedForReport].map(idx => state.history[idx]);
+
+            // Cabecera del PDF
+            const pageWidth = doc.internal.pageSize.getWidth();
+            doc.setFillColor(15, 26, 18);
+            doc.rect(0, 0, pageWidth, 32, 'F');
+
+            doc.setTextColor(61, 255, 143);
+            doc.setFontSize(18);
+            doc.setFont('helvetica', 'bold');
+            doc.text('InvenScan — Reporte de Inventario', 14, 14);
+
+            doc.setTextColor(122, 148, 132);
+            doc.setFontSize(9);
+            doc.setFont('helvetica', 'normal');
+            doc.text(`Generado: ${formatTime(new Date())}`, 14, 22);
+            doc.text(`Archivo: ${state.fileName || 'N/A'}  |  Registros: ${selectedEntries.length}`, 14, 27);
+
+            // Construir datos de la tabla
+            const headLabels = ['Codigo 2025', 'Sede', 'Descripcion', 'Placa'];
+            const bodyData = selectedEntries.map(entry => [
+                entry.record[cols.codigo] || '—',
+                entry.record[cols.sede] || '—',
+                entry.record[cols.descripcion] || '—',
+                entry.record[cols.placa] || '—',
+            ]);
+
+            doc.autoTable({
+                startY: 38,
+                head: [headLabels],
+                body: bodyData,
+                theme: 'grid',
+                styles: {
+                    font: 'helvetica',
+                    fontSize: 9,
+                    cellPadding: 4,
+                    lineColor: [42, 58, 47],
+                    lineWidth: 0.3,
+                },
+                headStyles: {
+                    fillColor: [26, 36, 29],
+                    textColor: [61, 255, 143],
+                    fontStyle: 'bold',
+                    fontSize: 10,
+                    halign: 'center',
+                },
+                alternateRowStyles: {
+                    fillColor: [19, 27, 22],
+                },
+                bodyStyles: {
+                    textColor: [232, 240, 235],
+                },
+                columnStyles: {
+                    0: { cellWidth: 40, fontStyle: 'bold', halign: 'center' },
+                    1: { cellWidth: 45 },
+                    2: { cellWidth: 'auto' },
+                    3: { cellWidth: 35, halign: 'center' },
+                },
+                margin: { left: 14, right: 14 },
+            });
+
+            // Pie de página
+            const finalY = doc.lastAutoTable.finalY || 38;
+            const pageHeight = doc.internal.pageSize.getHeight();
+
+            if (finalY + 20 < pageHeight) {
+                doc.setDrawColor(42, 58, 47);
+                doc.line(14, finalY + 6, pageWidth - 14, finalY + 6);
+                doc.setTextColor(122, 148, 132);
+                doc.setFontSize(8);
+                doc.text('Generado por InvenScan', 14, finalY + 12);
+                doc.text(`Total de registros en este reporte: ${selectedEntries.length}`, pageWidth - 14, finalY + 12, { align: 'right' });
+            }
+
+            // Números de página
+            const pageCount = doc.internal.getNumberOfPages();
+            for (let i = 1; i <= pageCount; i++) {
+                doc.setPage(i);
+                doc.setTextColor(122, 148, 132);
+                doc.setFontSize(8);
+                doc.text(`Pagina ${i} de ${pageCount}`, pageWidth - 14, pageHeight - 8, { align: 'right' });
+            }
+
+            const fileName = `reporte_invenscan_${Date.now()}.pdf`;
+            doc.save(fileName);
+            showToast(`Reporte generado: ${selectedEntries.length} registros`, 'success');
+        }
+
+        // ===== TOGGLES =====
+        function toggleVibration() {
+            state.vibrationOn = !state.vibrationOn;
+            document.getElementById('btnVibrate').style.background = state.vibrationOn ? '#3DFF8F' : '#2A3A2F';
+            document.getElementById('vibrateKnob').style.left = state.vibrationOn ? '24px' : '3px';
+        }
+        function toggleSound() {
+            state.soundOn = !state.soundOn;
+            document.getElementById('btnSound').style.background = state.soundOn ? '#3DFF8F' : '#2A3A2F';
+            document.getElementById('soundKnob').style.left = state.soundOn ? '24px' : '3px';
+        }
+
+        // ===== SONIDO =====
+        function playBeep() {
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.connect(gain); gain.connect(ctx.destination);
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(1200, ctx.currentTime);
+                osc.frequency.setValueAtTime(1600, ctx.currentTime + 0.05);
+                gain.gain.setValueAtTime(0.3, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+                osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.15);
+            } catch (e) {}
+        }
+
+        // ===== UTILIDADES =====
+        function formatTime(d) {
+            return d.toLocaleString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        }
+        function formatTimeShort(d) {
+            return d.toLocaleString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+        }
+
+        // ===== PERSISTENCIA =====
+        function saveState() {
+            try {
+                localStorage.setItem('invenscan_history', JSON.stringify(state.history.map(h => ({
+                    code: h.code, found: h.found, record: h.record, time: h.time
+                }))));
+            } catch (e) {}
+        }
+        function loadState() {
+            try {
+                const saved = localStorage.getItem('invenscan_history');
+                if (saved) state.history = JSON.parse(saved);
+            } catch (e) {}
+        }
+        setInterval(saveState, 5000);
+        loadState();
+    </script>
+</body>
+</html>
